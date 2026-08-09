@@ -13,8 +13,7 @@ from huawei_solar import (
     register_names as rn,
     register_values as rv,
 )
-from huawei_solar.register_definitions.number import NumberRegister
-from huawei_solar.registers import REGISTERS
+from huawei_solar.registry import REGISTER_LOCATIONS
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import EntityCategory
@@ -203,12 +202,11 @@ class HuaweiSolarSelectEntity(
         self._attr_device_info = device_info
         self._attr_unique_id = f"{device.serial_number}_{description.key}"
 
-        register = REGISTERS[description.register_name]
+        register_unit = REGISTER_LOCATIONS[description.register_name].definition().enum_type
 
-        assert isinstance(register, NumberRegister)
-        assert isinstance(register.unit, type) and issubclass(register.unit, IntEnum)
+        assert isinstance(register_unit, type) and issubclass(register_unit, IntEnum)
 
-        self._register_unit: type[IntEnum] = register.unit
+        self._register_unit: type[IntEnum] = register_unit
 
         self._attr_current_option = None
         self._attr_options = [
@@ -223,16 +221,13 @@ class HuaweiSolarSelectEntity(
             and self.entity_description.key in self.coordinator.data
         ):
             self._attr_current_option = self._friendly_format(
-                self.coordinator.data[self.entity_description.register_name].value
+                self.coordinator.data[self.entity_description.register_name]
             )
 
             if self.entity_description.check_is_available_func:
                 assert self.entity_description.is_available_key
-                is_available_register = self.coordinator.data[
-                    self.entity_description.is_available_key
-                ]
                 self._attr_available = self.entity_description.check_is_available_func(
-                    is_available_register.value if is_available_register else None
+                    self.coordinator.data.get(self.entity_description.is_available_key)
                 )
             else:
                 self._attr_available = True
@@ -318,7 +313,7 @@ class StorageModeSelectEntity(
         ):
             self._attr_current_option = self.coordinator.data[
                 self.entity_description.register_name
-            ].value.name.lower()
+            ].name.lower()
             self._attr_available = True
         else:
             self._attr_current_option = None

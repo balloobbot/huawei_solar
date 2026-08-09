@@ -3,7 +3,12 @@
 from dataclasses import dataclass
 from typing import TypedDict, cast
 
-from huawei_solar import HuaweiSolarDevice, RegisterName, SUN2000Device
+from huawei_solar import (
+    HuaweiModbusConnection,
+    HuaweiSolarDevice,
+    RegisterName,
+    SUN2000Device,
+)
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -49,6 +54,7 @@ type HuaweiSolarConfigEntry = ConfigEntry[HuaweiSolarData]
 class HuaweiSolarData(TypedDict):
     """Data for each Huawei Solar config entry."""
 
+    connection: HuaweiModbusConnection
     device_datas: list[HuaweiSolarDeviceData]
 
 

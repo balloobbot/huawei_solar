@@ -15,7 +15,7 @@ from huawei_solar import (
     register_names as rn,
     register_values as rv,
 )
-from huawei_solar.register_definitions.periods import (
+from huawei_solar.periods import (
     ChargeDischargePeriod,
     ChargeFlag,
     HUAWEI_LUNA2000_TimeOfUsePeriod,
@@ -326,7 +326,7 @@ async def _validate_power_value(
     # this already checked by voluptuous:
     assert isinstance(power, int)
 
-    maximum_active_power = (await dd.device.get(max_value_key)).value
+    maximum_active_power = await dd.device.get(max_value_key)
 
     if not power <= maximum_active_power:
         raise ValueError(f"Power cannot be more than {maximum_active_power}W")

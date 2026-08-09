@@ -18,6 +18,7 @@ from huawei_solar import (
     ConnectionException,
     ConnectionInterruptedException,
     EMMADevice,
+    HuaweiModbusConnection,
     HuaweiSolarException,
     InvalidCredentials,
     MeterDevice,
@@ -26,19 +27,21 @@ from huawei_solar import (
     SDongleDevice,
     SmartLoggerDevice,
     SUN2000Device,
+    PermissionDeniedError,
     create_device_instance,
-    create_rtu_client,
+    create_rtu_connection,
     create_sub_device_instance,
-    create_tcp_client,
+    create_tcp_connection,
     register_values as rv,
 )
 from huawei_solar.device.base import HuaweiSolarDevice, HuaweiSolarDeviceWithLogin
-from huawei_solar.modbus_pdu import PermissionDeniedError
+from modbus_connection import ModbusConnectionError
 
 from .const import (
     CONF_ENABLE_PARAMETER_CONFIGURATION,
     CONF_SLAVE_IDS,
     CONFIGURATION_UPDATE_INTERVAL,
+    DATA_CONNECTION,
     DATA_DEVICE_DATAS,
     DOMAIN,
     ENERGY_STORAGE_UPDATE_INTERVAL,
@@ -161,6 +164,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
     """Set up Huawei Solar from a config entry."""
 
     primary_device = None
+    connection = None
     try:
         # Multiple inverters can be connected to each other via a daisy chain,
         # via an internal modbus-network (ie. not the same modbus network that we are
@@ -185,18 +189,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
         #  │ SLAVE X │     │ SLAVE Y │    │SLAVE ...│
         #  └─────────┘     └─────────┘    └─────────┘
 
+        # One connection carries the whole daisy chain: every inverter, battery
+        # and meter behind the gateway is another unit id on the same link.
         if entry.data[CONF_HOST] is None:
-            client = create_rtu_client(
-                port=entry.data[CONF_PORT], unit_id=entry.data[CONF_SLAVE_IDS][0]
-            )
+            connection = create_rtu_connection(port=entry.data[CONF_PORT])
         else:
-            client = create_tcp_client(
+            connection = create_tcp_connection(
                 host=entry.data[CONF_HOST],
                 port=entry.data[CONF_PORT],
-                unit_id=entry.data[CONF_SLAVE_IDS][0],
             )
 
-        primary_device = await create_device_instance(client)
+        primary_unit_id = entry.data[CONF_SLAVE_IDS][0]
+        primary_device = await create_device_instance(
+            connection.for_unit(primary_unit_id), primary_unit_id
+        )
 
         if entry.data.get(CONF_ENABLE_PARAMETER_CONFIGURATION):
             if (
@@ -220,17 +226,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
         device_datas: list[HuaweiSolarDeviceData] = [primary_device_data]
 
         for extra_unit_id in entry.data[CONF_SLAVE_IDS][1:]:
-            sub_device = await create_sub_device_instance(primary_device, extra_unit_id)
+            sub_device = await create_sub_device_instance(
+                primary_device, connection, extra_unit_id
+            )
             sub_device_data = await _setup_device_data(hass, entry, sub_device)
 
             device_datas.append(sub_device_data)
 
         entry.runtime_data = {
+            DATA_CONNECTION: connection,
             DATA_DEVICE_DATAS: device_datas,
         }
     except ConnectionInterruptedException as err:
-        if primary_device is not None:
-            await primary_device.stop()
+        await _shutdown(primary_device, connection)
         host = entry.data.get(CONF_HOST) or entry.data.get(CONF_PORT)
         _LOGGER.warning(
             "Connection to the inverter at %s was interrupted during setup. "
@@ -242,9 +250,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
             f"Connection to the inverter at {host} was interrupted, probably by another device. "
             "The inverter only supports one Modbus connection at a time."
         ) from err
-    except ConnectionException as err:
-        if primary_device is not None:
-            await primary_device.stop()
+    except (ConnectionException, ModbusConnectionError) as err:
+        await _shutdown(primary_device, connection)
         host = entry.data.get(CONF_HOST) or entry.data.get(CONF_PORT)
         _LOGGER.warning(
             "Cannot connect to the inverter at %s. "
@@ -259,8 +266,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
         ) from err
 
     except TimeoutError as err:
-        if primary_device is not None:
-            await primary_device.stop()
+        await _shutdown(primary_device, connection)
         _LOGGER.warning(
             "The inverter is not responding to requests. "
             "The connection was established but no data was received. "
@@ -272,8 +278,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
         ) from err
 
     except HuaweiSolarException as err:
-        if primary_device is not None:
-            await primary_device.stop()
+        await _shutdown(primary_device, connection)
         _LOGGER.warning(
             "Failed to communicate with the inverter during setup: %s. ",
             err,
@@ -284,10 +289,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
         ) from err
 
     except Exception:
-        # always try to stop the bridge, as it will keep retrying
-        # in the background otherwise!
-        if primary_device is not None:
-            await primary_device.stop()
+        # always stop the device: its heartbeat task keeps running otherwise
+        await _shutdown(primary_device, connection)
         raise
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -296,14 +299,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
     return True
 
 
+async def _shutdown(
+    primary_device: HuaweiSolarDevice | None,
+    connection: HuaweiModbusConnection | None,
+) -> None:
+    """Stop the device and drop the link it was reached over."""
+    if primary_device is not None:
+        await primary_device.stop()
+    if connection is not None:
+        await connection.close()
+
+
 async def async_unload_entry(
     hass: HomeAssistant, entry: HuaweiSolarConfigEntry
 ) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         device_datas: list[HuaweiSolarDeviceData] = entry.runtime_data["device_datas"]
-        primary_device = device_datas[0].device
-        await primary_device.client.disconnect()
+        for device_data in device_datas:
+            await device_data.device.stop()
+        await entry.runtime_data["connection"].close()
 
     return unload_ok
 

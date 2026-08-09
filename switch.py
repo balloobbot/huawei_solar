@@ -208,15 +208,12 @@ class HuaweiSolarSwitchEntity(
         ):
             self._attr_is_on = self.coordinator.data[
                 self.entity_description.register_name
-            ].value
+            ]
 
             if self.entity_description.check_is_available_func:
                 assert self.entity_description.is_available_key
-                is_available_register = self.coordinator.data.get(
-                    self.entity_description.is_available_key
-                )
                 self._attr_available = self.entity_description.check_is_available_func(
-                    is_available_register.value if is_available_register else None
+                    self.coordinator.data.get(self.entity_description.is_available_key)
                 )
             else:
                 self._attr_available = True
@@ -301,7 +298,7 @@ class HuaweiSolarOnOffSwitchEntity(
             return  # Don't do status updates if async_turn_on or async_turn_off is running
 
         if self.coordinator.data and rn.DEVICE_STATUS in self.coordinator.data:
-            device_status = self.coordinator.data[rn.DEVICE_STATUS].value
+            device_status = self.coordinator.data[rn.DEVICE_STATUS]
 
             self._attr_is_on = not self._is_off(device_status)
             self._attr_available = True
@@ -320,7 +317,7 @@ class HuaweiSolarOnOffSwitchEntity(
                 self.MAX_STATUS_CHANGE_TIME_SECONDS // self.POLL_FREQUENCY_SECONDS
             ):
                 await asyncio.sleep(self.POLL_FREQUENCY_SECONDS)
-                device_status = (await self.device.client.get(rn.DEVICE_STATUS)).value
+                device_status = await self.device.get(rn.DEVICE_STATUS)
                 if not self._is_off(device_status):
                     self._attr_is_on = True
                     break
@@ -337,7 +334,7 @@ class HuaweiSolarOnOffSwitchEntity(
                 self.MAX_STATUS_CHANGE_TIME_SECONDS // self.POLL_FREQUENCY_SECONDS
             ):
                 await asyncio.sleep(self.POLL_FREQUENCY_SECONDS)
-                device_status = (await self.device.client.get(rn.DEVICE_STATUS)).value
+                device_status = await self.device.get(rn.DEVICE_STATUS)
                 if self._is_off(device_status):
                     self._attr_is_on = False
                     break

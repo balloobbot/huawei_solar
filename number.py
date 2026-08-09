@@ -313,7 +313,7 @@ async def async_setup_entry(
         else:
             _LOGGER.debug(
                 "No battery detected on slave %s. Skipping energy storage number entities",
-                ucs.device.client.unit_id,
+                ucs.device.unit_id,
             )
 
         entities_to_add.extend(slave_entities)
@@ -375,15 +375,11 @@ class HuaweiSolarNumberEntity(
 
         static_max_value = None
         if description.static_maximum_key:
-            static_max_value = (
-                await device.client.get(description.static_maximum_key)
-            ).value
+            static_max_value = await device.get(description.static_maximum_key)
 
         static_min_value = None
         if description.static_minimum_key:
-            static_min_value = (
-                await device.client.get(description.static_minimum_key)
-            ).value
+            static_min_value = await device.get(description.static_minimum_key)
 
         return cls(
             coordinator,
@@ -403,23 +399,25 @@ class HuaweiSolarNumberEntity(
         ):
             self._attr_native_value = self.coordinator.data[
                 self.entity_description.register_name
-            ].value
+            ]
 
             if self.entity_description.dynamic_minimum_key:
-                min_register = self.coordinator.data.get(
+                minimum = self.coordinator.data.get(
                     self.entity_description.dynamic_minimum_key
                 )
 
-                if min_register:
-                    self._dynamic_min_value = min_register.value
+                # A register decodes to its value now, and zero is a real limit,
+                # so presence has to be tested rather than truthiness.
+                if minimum is not None:
+                    self._dynamic_min_value = minimum
 
             if self.entity_description.dynamic_maximum_key:
-                max_register = self.coordinator.data.get(
+                maximum = self.coordinator.data.get(
                     self.entity_description.dynamic_maximum_key
                 )
 
-                if max_register:
-                    self._dynamic_max_value = max_register.value
+                if maximum is not None:
+                    self._dynamic_max_value = maximum
         else:
             self._attr_available = False
             self._attr_native_value = None

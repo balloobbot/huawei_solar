@@ -15,18 +15,20 @@ from huawei_solar import (
     HuaweiSolarException,
     InvalidCredentials,
     ReadException,
+    HuaweiModbusConnection,
     create_device_instance,
-    create_rtu_client,
+    create_rtu_connection,
+    create_scan_rtu_connection,
+    create_scan_tcp_connection,
     create_sub_device_instance,
-    create_tcp_client,
+    create_tcp_connection,
     get_device_infos,
 )
-from huawei_solar.modbus_client import create_scan_rtu_client, create_scan_tcp_client
 from huawei_solar.device import detect_device_type
 from huawei_solar.device.base import HuaweiSolarDeviceWithLogin
 from huawei_solar.exceptions import DeviceDetectionError
+from modbus_connection import ModbusConnectionError
 import serial.tools.list_ports
-from tmodbus.exceptions import ModbusConnectionError
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -57,13 +59,10 @@ CONF_MANUAL_PATH = "Enter Manually"
 
 async def validate_serial_setup(port: str, unit_ids: list[int]) -> dict[str, Any]:
     """Validate the serial device that was passed by the user."""
-    client = create_rtu_client(
-        port=port,
-        unit_id=unit_ids[0],
-    )
+    connection = create_rtu_connection(port=port)
     try:
-        await client.connect()
-        device = await create_device_instance(client)
+        await connection.connect()
+        device = await create_device_instance(connection.for_unit(unit_ids[0]), unit_ids[0])
 
         _LOGGER.info(
             "Successfully connected to device %s %s with SN %s",
@@ -80,7 +79,9 @@ async def validate_serial_setup(port: str, unit_ids: list[int]) -> dict[str, Any
         # Also validate the other slave-ids
         for slave_id in unit_ids[1:]:
             try:
-                slave_bridge = await create_sub_device_instance(device, slave_id)
+                slave_bridge = await create_sub_device_instance(
+                    device, connection, slave_id
+                )
 
                 _LOGGER.info(
                     "Successfully connected to sub device %s with ID %s: %s with SN %s",
@@ -96,27 +97,27 @@ async def validate_serial_setup(port: str, unit_ids: list[int]) -> dict[str, Any
         # Return info that you want to store in the config entry.
         return result
     finally:
-        # Cleanup this device object explicitly to prevent it from trying to maintain a modbus connection
+        # Drop the link explicitly: nothing else holds it once validation is done.
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def _auto_slave_discovery(
-    client: Any,
+    connection: HuaweiModbusConnection,
     *,
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[int, list[int]] | None:
     """Probe unit_ids 0-16 and 100 sequentially via Huawei get_device_infos messages.
 
     Returns (primary_unit_id, sub_unit_ids) if a device responds, or None if not.
-    The caller owns ``client`` and is responsible for connecting/disconnecting it.
+    The caller owns ``connection`` and is responsible for opening/closing it.
     """
     unit_ids_to_scan = [0, 100, *list(range(1, 17))]
 
     async def _probe(unit_id: int):
         _LOGGER.debug("AUTO: probing unit_id %s via get_device_infos", unit_id)
         try:
-            device_infos = await get_device_infos(client.for_unit_id(unit_id))
+            device_infos = await get_device_infos(connection.for_unit(unit_id))
         except (HuaweiSolarException, ReadException, TimeoutError) as err:
             _LOGGER.debug("AUTO: unit_id %s did not respond: %s", unit_id, err)
             raise
@@ -181,13 +182,13 @@ async def _tcp_auto_slave_discovery(
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[int, list[int]] | None:
     """Auto-discovery over TCP. Opens/closes its own connection."""
-    client = create_scan_tcp_client(host=host, port=port, unit_id=0)
+    connection = create_scan_tcp_connection(host=host, port=port)
     try:
-        await client.connect()
-        return await _auto_slave_discovery(client, on_progress=on_progress)
+        await connection.connect()
+        return await _auto_slave_discovery(connection, on_progress=on_progress)
     finally:
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def _rtu_auto_slave_discovery(
@@ -196,17 +197,17 @@ async def _rtu_auto_slave_discovery(
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[int, list[int]] | None:
     """Auto-discovery over RTU (serial). Opens/closes its own connection."""
-    client = create_scan_rtu_client(serial_port, unit_id=0)
+    connection = create_scan_rtu_connection(serial_port)
     try:
-        await client.connect()
-        return await _auto_slave_discovery(client, on_progress=on_progress)
+        await connection.connect()
+        return await _auto_slave_discovery(connection, on_progress=on_progress)
     finally:
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def _scan_slave_discovery(
-    client: Any,
+    connection: HuaweiModbusConnection,
     *,
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[int, list[int]]:
@@ -214,7 +215,7 @@ async def _scan_slave_discovery(
 
     Returns (primary_unit_id, sub_unit_ids) for all responding devices.
     Raises DeviceException if no device is found.
-    The caller owns ``client`` and is responsible for connecting/disconnecting it.
+    The caller owns ``connection`` and is responsible for opening/closing it.
     Does not use Huawei device-discovery Modbus messages, making it compatible
     with modbus proxies.
     """
@@ -223,7 +224,9 @@ async def _scan_slave_discovery(
     async def _probe(unit_id: int) -> tuple[int, str] | None:
         _LOGGER.debug("SCAN: probing unit_id %s via detect_device_type", unit_id)
         try:
-            _, model_name = await detect_device_type(client.for_unit_id(unit_id))
+            _, model_name = await detect_device_type(
+                connection.for_unit(unit_id), unit_id
+            )
             _LOGGER.debug(
                 "SCAN: unit_id %s identified as model=%s", unit_id, model_name
             )
@@ -266,13 +269,13 @@ async def _tcp_scan_slave_discovery(
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[int, list[int]]:
     """Scan-discovery over TCP. Opens/closes its own connection."""
-    client = create_scan_tcp_client(host=host, port=port, unit_id=0)
+    connection = create_scan_tcp_connection(host=host, port=port)
     try:
-        await client.connect()
-        return await _scan_slave_discovery(client, on_progress=on_progress)
+        await connection.connect()
+        return await _scan_slave_discovery(connection, on_progress=on_progress)
     finally:
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def _rtu_scan_slave_discovery(
@@ -281,13 +284,13 @@ async def _rtu_scan_slave_discovery(
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[int, list[int]]:
     """Scan-discovery over RTU (serial). Opens/closes its own connection."""
-    client = create_scan_rtu_client(serial_port, unit_id=0)
+    connection = create_scan_rtu_connection(serial_port)
     try:
-        await client.connect()
-        return await _scan_slave_discovery(client, on_progress=on_progress)
+        await connection.connect()
+        return await _scan_slave_discovery(connection, on_progress=on_progress)
     finally:
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def _connect_to_discovered_devices(
@@ -302,10 +305,12 @@ async def _connect_to_discovered_devices(
 
     Returns a dict with slave_ids, model_name, serial_number and has_write_permission.
     """
-    client = create_tcp_client(host=host, port=port, unit_id=primary_unit_id)
+    connection = create_tcp_connection(host=host, port=port)
     try:
-        await client.connect()
-        device = await create_device_instance(client)
+        await connection.connect()
+        device = await create_device_instance(
+            connection.for_unit(primary_unit_id), primary_unit_id
+        )
 
         _LOGGER.info(
             "Successfully connected to primary device with unit_id %s: %s %s with SN %s",
@@ -323,7 +328,9 @@ async def _connect_to_discovered_devices(
         unit_ids = [primary_unit_id]
         for sub_unit_id in sub_unit_ids:
             try:
-                sub_device = await create_sub_device_instance(device, sub_unit_id)
+                sub_device = await create_sub_device_instance(
+                    device, connection, sub_unit_id
+                )
                 _LOGGER.info(
                     "Successfully connected to sub device with unit_id %s. %s: %s with SN %s",
                     sub_unit_id,
@@ -346,7 +353,7 @@ async def _connect_to_discovered_devices(
         }
     finally:
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def validate_network_setup(
@@ -364,18 +371,16 @@ async def validate_network_setup(
         DeviceException: if the TCP connection was established but the device rejected the
             slave ID (connection closed by remote), or a sub-device could not be reached.
     """
-    client = create_scan_tcp_client(
-        host=host,
-        port=port,
-        unit_id=unit_ids[0],
-    )
+    connection = create_scan_tcp_connection(host=host, port=port)
     # Separate the TCP connect from the device communication so callers can
     # distinguish "host unreachable" from "wrong slave ID".
-    await client.connect()
+    await connection.connect()
 
     try:
         try:
-            device = await create_device_instance(client)
+            device = await create_device_instance(
+                connection.for_unit(unit_ids[0]), unit_ids[0]
+            )
         except (ConnectionException, ModbusConnectionError, TimeoutError) as err:
             # TCP connected but device closed the connection → wrong slave ID.
             raise DeviceException(
@@ -397,7 +402,9 @@ async def validate_network_setup(
 
         for unit_id in unit_ids[1:]:
             try:
-                sub_device = await create_sub_device_instance(device, unit_id)
+                sub_device = await create_sub_device_instance(
+                    device, connection, unit_id
+                )
 
                 _LOGGER.info(
                     "Successfully connected to sub device %s %s: %s with SN %s",
@@ -425,7 +432,7 @@ async def validate_network_setup(
         }
     finally:
         with contextlib.suppress(Exception):
-            await client.disconnect()
+            await connection.close()
 
 
 async def validate_network_setup_login(
@@ -437,15 +444,12 @@ async def validate_network_setup_login(
     password: str,
 ) -> bool:
     """Verify the installer username/password and test if it can perform a write-operation."""
-    client = create_tcp_client(
-        host=host,
-        port=port,
-        unit_id=unit_id,
-    )
+    connection = create_tcp_connection(host=host, port=port)
+    bridge = None
     try:
         # these parameters have already been tested in validate_input, so this should work fine!
-        await client.connect()
-        bridge = await create_device_instance(client)
+        await connection.connect()
+        bridge = await create_device_instance(connection.for_unit(unit_id), unit_id)
 
         assert isinstance(bridge, HuaweiSolarDeviceWithLogin)
 
@@ -458,8 +462,10 @@ async def validate_network_setup_login(
         return False
     finally:
         if bridge is not None:
-            # Cleanup this inverter object explicitly to prevent it from trying to maintain a modbus connection
+            # Stop the device explicitly: its heartbeat task outlives the flow otherwise
             await bridge.stop()
+        with contextlib.suppress(Exception):
+            await connection.close()
 
 
 def parse_unit_ids(unit_ids: str) -> list[int]:

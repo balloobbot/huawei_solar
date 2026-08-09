@@ -15,7 +15,7 @@ from huawei_solar import (
     register_values as rv,
 )
 from huawei_solar.files import OptimizerRunningStatus
-from huawei_solar.register_definitions.periods import (
+from huawei_solar.periods import (
     ChargeFlag,
     HUAWEI_LUNA2000_TimeOfUsePeriod,
     LG_RESU_TimeOfUsePeriod,
@@ -2308,7 +2308,7 @@ class HuaweiSolarSensorEntity(
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         if self.coordinator.data and self._register_key in self.coordinator.data:
-            value = self.coordinator.data[self._register_key].value
+            value = self.coordinator.data[self._register_key]
 
             if self.entity_description.value_conversion_function:
                 value = self.entity_description.value_conversion_function(value)
@@ -2360,7 +2360,7 @@ class HuaweiSolarAlarmSensorEntity(HuaweiSolarSensorEntity):
                 alarm_result = self.coordinator.data.get(alarm_register)
                 if alarm_result:
                     available = True
-                    alarms.extend(alarm_result.value)
+                    alarms.extend(alarm_result)
             if len(alarms) == 0:
                 self._attr_native_value = "None"
             else:
@@ -2419,7 +2419,7 @@ class SmartLoggerAlarmSensorEntity(HuaweiSolarSensorEntity):
                 alarm_result = self.coordinator.data.get(alarm_register)
                 if alarm_result:
                     available = True
-                    alarms.extend(alarm_result.value)
+                    alarms.extend(alarm_result)
             if len(alarms) == 0:
                 self._attr_native_value = "None"
             else:
@@ -2504,7 +2504,7 @@ class HuaweiSolarTOUSensorEntity(
 
             data: list[HUAWEI_LUNA2000_TimeOfUsePeriod] = self.coordinator.data[
                 self.entity_description.register_name
-            ].value
+            ]
 
             self._attr_native_value = len(data)
             self._attr_extra_state_attributes = {
@@ -2572,7 +2572,7 @@ class HuaweiSolarPricePeriodsSensorEntity(
 
             data: list[LG_RESU_TimeOfUsePeriod] = self.coordinator.data[
                 self.entity_description.register_name
-            ].value
+            ]
 
             self._attr_native_value = len(data)
             self._attr_extra_state_attributes = {
@@ -2635,7 +2635,7 @@ class HuaweiSolarCapacityControlPeriodsSensorEntity(
         ):
             data: list[PeakSettingPeriod] = self.coordinator.data[
                 self.entity_description.register_name
-            ].value
+            ]
 
             self._attr_available = True
             self._attr_native_value = len(data)
@@ -2695,22 +2695,16 @@ class HuaweiSolarForcibleChargeEntity(
             self.coordinator.data
             and set(self.REGISTER_NAMES) <= self.coordinator.data.keys()
         ):
-            mode = self.coordinator.data[
-                rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_WRITE
-            ].value
+            mode = self.coordinator.data[rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_WRITE]
             setting = self.coordinator.data[
                 rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_SETTING_MODE
-            ].value
-            charge_power = self.coordinator.data[rn.STORAGE_FORCIBLE_CHARGE_POWER].value
-            discharge_power = self.coordinator.data[
-                rn.STORAGE_FORCIBLE_DISCHARGE_POWER
-            ].value
-            target_soc = self.coordinator.data[
-                rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_SOC
-            ].value
+            ]
+            charge_power = self.coordinator.data[rn.STORAGE_FORCIBLE_CHARGE_POWER]
+            discharge_power = self.coordinator.data[rn.STORAGE_FORCIBLE_DISCHARGE_POWER]
+            target_soc = self.coordinator.data[rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_SOC]
             duration = self.coordinator.data[
                 rn.STORAGE_FORCED_CHARGING_AND_DISCHARGING_PERIOD
-            ].value
+            ]
 
             if mode == rv.StorageForcibleChargeDischarge.STOP:
                 value = "Stopped"
@@ -2786,13 +2780,11 @@ class HuaweiSolarActivePowerControlModeEntity(
             self.coordinator.data
             and set(self.REGISTER_NAMES) <= self.coordinator.data.keys()
         ):
-            mode = self.coordinator.data[rn.ACTIVE_POWER_CONTROL_MODE].value
-            maximum_power_watt = self.coordinator.data[
-                rn.MAXIMUM_FEED_GRID_POWER_WATT
-            ].value
+            mode = self.coordinator.data[rn.ACTIVE_POWER_CONTROL_MODE]
+            maximum_power_watt = self.coordinator.data[rn.MAXIMUM_FEED_GRID_POWER_WATT]
             maximum_power_percent = self.coordinator.data[
                 rn.MAXIMUM_FEED_GRID_POWER_PERCENT
-            ].value
+            ]
 
             if mode == rv.ActivePowerControlMode.UNLIMITED:
                 value = "Unlimited"

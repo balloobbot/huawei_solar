@@ -36,7 +36,7 @@ async def async_get_config_entry_diagnostics(
     }
     for dd in device_datas:
         if isinstance(dd, HuaweiSolarInverterData):
-            diagnostics_data[f"device_{dd.device.client.unit_id}"] = {
+            diagnostics_data[f"device_{dd.device.unit_id}"] = {
                 "_type": "SUN2000",
                 "model_name": dd.device.model_name,
                 "firmware_version": dd.device.firmware_version,
@@ -52,31 +52,31 @@ async def async_get_config_entry_diagnostics(
 
             if dd.power_meter_update_coordinator:
                 diagnostics_data[
-                    f"device_{dd.device.client.unit_id}_power_meter_data"
+                    f"device_{dd.device.unit_id}_power_meter_data"
                 ] = dd.power_meter_update_coordinator.data
 
             if dd.energy_storage_update_coordinator:
-                diagnostics_data[f"device_{dd.device.client.unit_id}_battery_data"] = (
+                diagnostics_data[f"device_{dd.device.unit_id}_battery_data"] = (
                     dd.energy_storage_update_coordinator.data
                 )
 
             if dd.optimizer_update_coordinator:
                 diagnostics_data[
-                    f"device_{dd.device.client.unit_id}_optimizer_data"
+                    f"device_{dd.device.unit_id}_optimizer_data"
                 ] = dd.optimizer_update_coordinator.data
         else:
-            diagnostics_data[f"device_{dd.device.client.unit_id}"] = {
+            diagnostics_data[f"device_{dd.device.unit_id}"] = {
                 "_type": type(dd.device).__name__,
                 "model_name": dd.device.model_name,
                 "serial_number": dd.device.serial_number,
             }
 
-        diagnostics_data[f"device_{dd.device.client.unit_id}_data"] = (
+        diagnostics_data[f"device_{dd.device.unit_id}_data"] = (
             dd.update_coordinator.data
         )
 
         if dd.configuration_update_coordinator:
-            diagnostics_data[f"device_{dd.device.client.unit_id}_config_data"] = (
+            diagnostics_data[f"device_{dd.device.unit_id}_config_data"] = (
                 dd.configuration_update_coordinator.data
             )
 

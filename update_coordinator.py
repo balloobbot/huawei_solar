@@ -13,7 +13,6 @@ from huawei_solar import (
     HuaweiSolarException,
     ReadException,
     RegisterName,
-    Result,
     SUN2000Device,
 )
 from huawei_solar.device.base import HuaweiSolarDevice
@@ -30,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class HuaweiSolarUpdateCoordinator(
-    DataUpdateCoordinator[dict[RegisterName, Result[Any]]]
+    DataUpdateCoordinator[dict[RegisterName, Any]]
 ):
     """A specialised DataUpdateCoordinator for Huawei Solar entities."""
 
@@ -43,7 +42,7 @@ class HuaweiSolarUpdateCoordinator(
         device: HuaweiSolarDevice,
         name: str,
         update_interval: timedelta | None = None,
-        update_method: Callable[[], Awaitable[dict[RegisterName, Result[Any]]]]
+        update_method: Callable[[], Awaitable[dict[RegisterName, Any]]]
         | None = None,
         request_refresh_debouncer: Debouncer | None = None,
         update_timeout: timedelta = UPDATE_TIMEOUT,
@@ -60,7 +59,7 @@ class HuaweiSolarUpdateCoordinator(
         self.device = device
         self.update_timeout = update_timeout
 
-    async def _async_update_data(self) -> dict[RegisterName, Result[Any]]:
+    async def _async_update_data(self) -> dict[RegisterName, Any]:
         register_names_set = set(
             chain.from_iterable(ctx["register_names"] for ctx in self.async_contexts())
         )

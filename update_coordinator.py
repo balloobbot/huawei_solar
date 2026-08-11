@@ -10,6 +10,7 @@ from typing import Any
 from huawei_solar import (
     ConnectionInterruptedException,
     DecodeError,
+    HuaweiModbusConnection,
     HuaweiSolarException,
     ReadException,
     RegisterName,
@@ -17,6 +18,7 @@ from huawei_solar import (
 )
 from huawei_solar.device.base import HuaweiSolarDevice
 from huawei_solar.files import OptimizerRealTimeData
+from modbus_connection import ExceptionCode, ModbusConnectionError
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
@@ -26,6 +28,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import OPTIMIZER_UPDATE_TIMEOUT, UPDATE_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
+
+# The library already retries a timed-out request three times, so this many
+# updates in a row failing means the link is wedged rather than the device slow.
+TIMEOUTS_BEFORE_RECONNECT = 3
 
 
 class HuaweiSolarUpdateCoordinator(
@@ -40,6 +46,7 @@ class HuaweiSolarUpdateCoordinator(
         hass: HomeAssistant,
         logger: logging.Logger,
         device: HuaweiSolarDevice,
+        connection: HuaweiModbusConnection,
         name: str,
         update_interval: timedelta | None = None,
         update_method: Callable[[], Awaitable[dict[RegisterName, Any]]]
@@ -57,7 +64,36 @@ class HuaweiSolarUpdateCoordinator(
             request_refresh_debouncer=request_refresh_debouncer,
         )
         self.device = device
+        self.connection = connection
         self.update_timeout = update_timeout
+        self._consecutive_timeouts = 0
+
+    async def _recycle_link(self) -> None:
+        """Drop a link that is up but no longer answering.
+
+        Reconnecting is otherwise automatic: every request connects first, so a
+        dropped link heals within one update interval. The one case that cannot
+        heal itself is a link the transport still considers open while the
+        device behind it has stopped answering - which is what an inverter
+        behind an SDongle or a serial-to-network bridge does. Dropping the link
+        makes the next poll open a fresh one, without reloading the entry.
+        """
+        self._consecutive_timeouts += 1
+        if self._consecutive_timeouts < TIMEOUTS_BEFORE_RECONNECT:
+            return
+
+        self._consecutive_timeouts = 0
+        _LOGGER.warning(
+            "No response from %s for %s updates in a row. Dropping the Modbus "
+            "link so the next update establishes a fresh one",
+            self.device.serial_number,
+            TIMEOUTS_BEFORE_RECONNECT,
+        )
+        try:
+            await self.connection.disconnect()
+        except ModbusConnectionError:
+            # The link is dropped regardless; the next request opens a new one.
+            _LOGGER.debug("Tearing down the Modbus link failed", exc_info=True)
 
     async def _async_update_data(self) -> dict[RegisterName, Any]:
         register_names_set = set(
@@ -65,14 +101,15 @@ class HuaweiSolarUpdateCoordinator(
         )
         try:
             async with asyncio.timeout(self.update_timeout.total_seconds()):
-                return await self.device.batch_update(list(register_names_set))
+                data = await self.device.batch_update(list(register_names_set))
         except TimeoutError as err:
+            await self._recycle_link()
             raise UpdateFailed(
                 f"Timeout communicating with {self.device.serial_number}: "
                 "the device did not respond in time"
             ) from err
         except ReadException as err:
-            if err.modbus_exception_code == 0x02:  # ILLEGAL_DATA_ADDRESS
+            if err.modbus_exception_code == ExceptionCode.ILLEGAL_DATA_ADDRESS:
                 _LOGGER.error(
                     "Device %s reported an illegal address error during a batch update. "
                     "This likely means the library is querying a register that is not "
@@ -101,6 +138,9 @@ class HuaweiSolarUpdateCoordinator(
             raise UpdateFailed(
                 f"Could not update {self.device.serial_number} values: {err}"
             ) from err
+
+        self._consecutive_timeouts = 0
+        return data
 
 
 class HuaweiSolarOptimizerUpdateCoordinator(

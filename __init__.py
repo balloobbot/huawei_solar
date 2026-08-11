@@ -220,6 +220,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
         primary_device_data = await _setup_device_data(
             hass,
             entry,
+            connection,
             primary_device,
         )
 
@@ -229,7 +230,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HuaweiSolarConfigEntry) 
             sub_device = await create_sub_device_instance(
                 primary_device, connection, extra_unit_id
             )
-            sub_device_data = await _setup_device_data(hass, entry, sub_device)
+            sub_device_data = await _setup_device_data(
+                hass, entry, connection, sub_device
+            )
 
             device_datas.append(sub_device_data)
 
@@ -342,6 +345,7 @@ def _battery_product_model_to_model(spm: rv.StorageProductModel) -> str | None:
 async def _setup_inverter_device_data(
     hass: HomeAssistant,
     entry: ConfigEntry,
+    connection: HuaweiModbusConnection,
     device: SUN2000Device,
     *,
     via_device_id: str | None = None,
@@ -373,6 +377,7 @@ async def _setup_inverter_device_data(
         hass,
         _LOGGER,
         device=device,
+        connection=connection,
         name=f"{device.serial_number}_data_update_coordinator",
         update_interval=INVERTER_UPDATE_INTERVAL,
     )
@@ -390,6 +395,7 @@ async def _setup_inverter_device_data(
             hass,
             _LOGGER,
             device=device,
+            connection=connection,
             name=f"{device.serial_number}_power_meter_data_update_coordinator",
             update_interval=POWER_METER_UPDATE_INTERVAL,
         )
@@ -413,6 +419,7 @@ async def _setup_inverter_device_data(
             hass,
             _LOGGER,
             device=device,
+            connection=connection,
             name=f"{device.serial_number}_battery_data_update_coordinator",
             update_interval=ENERGY_STORAGE_UPDATE_INTERVAL,
         )
@@ -477,18 +484,19 @@ async def _setup_inverter_device_data(
                 optimizers_device_infos,
                 OPTIMIZER_UPDATE_INTERVAL,
             )
+        except PermissionDeniedError as exception:
+            # The library recognises Huawei's private exception code 0x80 and
+            # raises this instead of a ReadException carrying the raw code.
+            _LOGGER.info(
+                "Cannot create optimizer sensor entities as the integration has insufficient permissions. "
+                "Consider enabling elevated permissions to get more optimizer data",
+                exc_info=exception,
+            )
         except ReadException as exception:
-            if exception.modbus_exception_code == PermissionDeniedError.error_code:
-                _LOGGER.info(
-                    "Cannot create optimizer sensor entities as the integration has insufficient permissions. "
-                    "Consider enabling elevated permissions to get more optimizer data",
-                    exc_info=exception,
-                )
-            else:
-                _LOGGER.exception(
-                    "Cannot create optimizer sensor entities due to a read error",
-                    exc_info=exception,
-                )
+            _LOGGER.exception(
+                "Cannot create optimizer sensor entities due to a read error",
+                exc_info=exception,
+            )
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.exception(
                 "Cannot create optimizer sensor entities due to an unexpected error",
@@ -500,6 +508,7 @@ async def _setup_inverter_device_data(
             hass,
             _LOGGER,
             device=device,
+            connection=connection,
             name=f"{device.serial_number}_config_data_update_coordinator",
             update_interval=CONFIGURATION_UPDATE_INTERVAL,
         )
@@ -535,6 +544,7 @@ DEVICE_CLASS_TO_TRANSLATION_KEY: dict[type[HuaweiSolarDevice], str] = {
 async def _setup_device_data(
     hass: HomeAssistant,
     entry: ConfigEntry,
+    connection: HuaweiModbusConnection,
     device: HuaweiSolarDevice,
     *,
     via_device_id: str | None = None,
@@ -542,7 +552,7 @@ async def _setup_device_data(
     """Create the correct DeviceInfo-objects, which can be used to correctly assign to entities in this integration."""
     if isinstance(device, SUN2000Device):
         return await _setup_inverter_device_data(
-            hass, entry, device, via_device_id=via_device_id
+            hass, entry, connection, device, via_device_id=via_device_id
         )
 
     device_registry = dr.async_get(hass)
@@ -574,6 +584,7 @@ async def _setup_device_data(
         hass,
         _LOGGER,
         device=device,
+        connection=connection,
         name=f"{device.serial_number}_data_update_coordinator",
         update_interval=INVERTER_UPDATE_INTERVAL,
     )
@@ -583,6 +594,7 @@ async def _setup_device_data(
             hass,
             _LOGGER,
             device=device,
+            connection=connection,
             name=f"{device.serial_number}_config_data_update_coordinator",
             update_interval=CONFIGURATION_UPDATE_INTERVAL,
         )

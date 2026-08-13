@@ -83,6 +83,7 @@ class HuaweiSolarUpdateCoordinator(
         self.update_timeout = update_timeout
         self._consecutive_timeouts = 0
         self._failed_components: set[str] = set()
+        self.last_report: UpdateReport | None = None
 
     def _report_failed_components(self, report: UpdateReport) -> None:
         """Log the components that newly stopped answering, one line each.
@@ -178,6 +179,7 @@ class HuaweiSolarUpdateCoordinator(
         # Something answered, so the link is not the problem.
         self._consecutive_timeouts = 0
         self._report_failed_components(report)
+        self.last_report = report
         return report.values
 
 

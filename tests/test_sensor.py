@@ -16,6 +16,9 @@ from homeassistant.helpers import entity_registry as er
 import homeassistant.util.dt as dt_util
 
 from custom_components.huawei_solar.const import DOMAIN, INVERTER_UPDATE_INTERVAL
+from custom_components.huawei_solar.diagnostics import (
+    async_get_config_entry_diagnostics,
+)
 
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -149,3 +152,22 @@ async def test_a_failing_component_is_logged_once(
 
     await _poll(hass, 2)
     assert caplog.text.count("Failed to fetch Inverter") == 1
+
+
+async def test_diagnostics_name_the_component_that_stopped_answering(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    mock_unit: MockModbusUnit,
+) -> None:
+    """Values alone do not say why a register is missing; the poll outcome does."""
+    mock_unit.fail_read(
+        REGISTER_LOCATIONS[TOTAL_SENSOR].definition().address,
+        ModbusTimeoutError("component gone"),
+    )
+    await _poll(hass, 1)
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, init_integration)
+    poll = diagnostics[f"device_{UNIT_ID}_poll"]
+
+    assert "component gone" in poll["failed"]["Inverter"]
+    assert "Inverter" not in poll["updated"]

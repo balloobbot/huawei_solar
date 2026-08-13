@@ -15,10 +15,15 @@ from huawei_solar import (
     ReadException,
     RegisterName,
     SUN2000Device,
+    UpdateReport,
 )
 from huawei_solar.device.base import HuaweiSolarDevice
 from huawei_solar.files import OptimizerRealTimeData
-from modbus_connection import ExceptionCode, ModbusConnectionError
+from modbus_connection import (
+    ExceptionCode,
+    IllegalDataAddressError,
+    ModbusConnectionError,
+)
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.debounce import Debouncer
@@ -32,6 +37,16 @@ _LOGGER = logging.getLogger(__name__)
 # The library already retries a timed-out request three times, so this many
 # updates in a row failing means the link is wedged rather than the device slow.
 TIMEOUTS_BEFORE_RECONNECT = 3
+
+ILLEGAL_ADDRESS_HELP = (
+    "Device %s reported an illegal address error during a batch update. "
+    "This likely means the library is querying a register that is not "
+    "supported by your specific device. "
+    "To find the culprit: systematically disable sensors one by one in "
+    "Home Assistant, wait at least 30 seconds after each change, and "
+    "check whether the error disappears. Please report the offending "
+    "sensor to the integration maintainers."
+)
 
 
 class HuaweiSolarUpdateCoordinator(
@@ -67,6 +82,43 @@ class HuaweiSolarUpdateCoordinator(
         self.connection = connection
         self.update_timeout = update_timeout
         self._consecutive_timeouts = 0
+        self._failed_components: set[str] = set()
+
+    def _report_failed_components(self, report: UpdateReport) -> None:
+        """Log the components that did not answer, when that set changes.
+
+        A component stays quiet for hours at a time, and at one poll every 30
+        seconds saying so on every one of them buries the log. Only the onset
+        is worth a line, and the recovery that ends it.
+        """
+        if set(report.failed) == self._failed_components:
+            return
+
+        if report.failed:
+            _LOGGER.warning(
+                "Device %s did not answer for %s. Only the entities behind "
+                "those registers become unavailable; the rest of the device "
+                "keeps updating",
+                self.device.serial_number,
+                ", ".join(
+                    f"{name} ({type(err).__name__})"
+                    for name, err in sorted(report.failed.items())
+                ),
+            )
+            # A refused address used to surface as a failed update. Now that it
+            # only costs one component, this is the only place it is said.
+            if any(
+                isinstance(err, IllegalDataAddressError)
+                for err in report.failed.values()
+            ):
+                _LOGGER.error(ILLEGAL_ADDRESS_HELP, self.device.serial_number)
+        else:
+            _LOGGER.info(
+                "Device %s is answering for all of its registers again",
+                self.device.serial_number,
+            )
+
+        self._failed_components = set(report.failed)
 
     async def _recycle_link(self) -> None:
         """Drop a link that is up but no longer answering.
@@ -101,7 +153,7 @@ class HuaweiSolarUpdateCoordinator(
         )
         try:
             async with asyncio.timeout(self.update_timeout.total_seconds()):
-                data = await self.device.batch_update(list(register_names_set))
+                report = await self.device.batch_update_report(list(register_names_set))
         except TimeoutError as err:
             await self._recycle_link()
             raise UpdateFailed(
@@ -109,17 +161,10 @@ class HuaweiSolarUpdateCoordinator(
                 "the device did not respond in time"
             ) from err
         except ReadException as err:
+            # Only reached when no component answered at all: a single component
+            # refusing an address is contained and reported below instead.
             if err.modbus_exception_code == ExceptionCode.ILLEGAL_DATA_ADDRESS:
-                _LOGGER.error(
-                    "Device %s reported an illegal address error during a batch update. "
-                    "This likely means the library is querying a register that is not "
-                    "supported by your specific device. "
-                    "To find the culprit: systematically disable sensors one by one in "
-                    "Home Assistant, wait at least 30 seconds after each change, and "
-                    "check whether the error disappears. Please report the offending "
-                    "sensor to the integration maintainers.",
-                    self.device.serial_number,
-                )
+                _LOGGER.error(ILLEGAL_ADDRESS_HELP, self.device.serial_number)
             raise UpdateFailed(
                 f"Could not update {self.device.serial_number} values: {err}"
             ) from err
@@ -139,8 +184,10 @@ class HuaweiSolarUpdateCoordinator(
                 f"Could not update {self.device.serial_number} values: {err}"
             ) from err
 
+        # Something answered, so the link is not the problem.
         self._consecutive_timeouts = 0
-        return data
+        self._report_failed_components(report)
+        return report.values
 
 
 class HuaweiSolarOptimizerUpdateCoordinator(

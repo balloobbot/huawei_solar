@@ -23,6 +23,7 @@ from huawei_solar.periods import (
 )
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -2278,7 +2279,7 @@ async def async_setup_entry(
     async_add_entities(entities_to_add, True)
 
 
-class HuaweiSolarStatisticsAvailability(SensorEntity):
+class HuaweiSolarStatisticsAvailability(RestoreSensor):
     """Decides whether a sensor holds its last value instead of dropping out."""
 
     entity_description: HuaweiSolarSensorEntityDescription
@@ -2304,6 +2305,28 @@ class HuaweiSolarStatisticsAvailability(SensorEntity):
             SensorStateClass.TOTAL,
             SensorStateClass.TOTAL_INCREASING,
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Seed a total with the value it held before the restart.
+
+        Holding the value only lasts as long as the process does, so without
+        this a restart while the device is asleep still gaps statistics.
+        """
+        await super().async_added_to_hass()
+
+        if (
+            self.always_available
+            and (last_data := await self.async_get_last_sensor_data()) is not None
+        ):
+            self._attr_native_value = last_data.native_value
+
+        # Not _handle_coordinator_update(): that writes the state, which Home
+        # Assistant does itself right after this returns.
+        self._process_data()
+
+    def _process_data(self) -> None:
+        """Take this entity's value out of the coordinator's latest data."""
+        raise NotImplementedError
 
 
 class HuaweiSolarSensorEntity(
@@ -2350,22 +2373,26 @@ class HuaweiSolarSensorEntity(
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
+        self._process_data()
+        super()._handle_coordinator_update()
+
+    def _process_data(self) -> None:
+        """Take this entity's value out of the coordinator's latest data."""
         if self.coordinator.data and self._register_key in self.coordinator.data:
             value = self.coordinator.data[self._register_key]
 
             if self.entity_description.value_conversion_function:
                 value = self.entity_description.value_conversion_function(value)
 
-            self._attr_native_value = value
             self._attr_available = True
         else:
+            value = None
             self._attr_available = False
-            # Clearing this would publish 'unknown', which gaps statistics just
-            # as unavailable does.
-            if not self.always_available:
-                self._attr_native_value = None
 
-        self.async_write_ha_state()
+        # Clearing a total would publish 'unknown', which gaps statistics just
+        # as unavailable does.
+        if value is not None or not self.always_available:
+            self._attr_native_value = value
 
 
 class HuaweiSolarAlarmSensorEntity(HuaweiSolarSensorEntity):
@@ -2395,9 +2422,8 @@ class HuaweiSolarAlarmSensorEntity(HuaweiSolarSensorEntity):
             {"register_names": HuaweiSolarAlarmSensorEntity.ALARM_REGISTERS},
         )
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+    def _process_data(self) -> None:
+        """Take this entity's value out of the coordinator's latest data."""
         available = False
 
         if self.coordinator.data:
@@ -2417,7 +2443,6 @@ class HuaweiSolarAlarmSensorEntity(HuaweiSolarSensorEntity):
             self._attr_native_value = None
 
         self._attr_available = available
-        self.async_write_ha_state()
 
 
 class SmartLoggerAlarmSensorEntity(HuaweiSolarSensorEntity):
@@ -2454,9 +2479,8 @@ class SmartLoggerAlarmSensorEntity(HuaweiSolarSensorEntity):
             {"register_names": SmartLoggerAlarmSensorEntity.ALARM_REGISTERS},
         )
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+    def _process_data(self) -> None:
+        """Take this entity's value out of the coordinator's latest data."""
         available = False
 
         if self.coordinator.data:
@@ -2476,7 +2500,6 @@ class SmartLoggerAlarmSensorEntity(HuaweiSolarSensorEntity):
             self._attr_native_value = None
 
         self._attr_available = available
-        self.async_write_ha_state()
 
 
 def _days_effective_to_str(
@@ -2902,32 +2925,35 @@ class HuaweiSolarOptimizerSensorEntity(
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
+        self._process_data()
+        super()._handle_coordinator_update()
+
+    def _process_data(self) -> None:
+        """Take this entity's value out of the coordinator's latest data."""
+        data = self.coordinator.data or {}
         self._attr_available = (
-            self.optimizer_id in self.coordinator.data
+            self.optimizer_id in data
             # Optimizer data fields only return sensible data when the
             # optimizer is not offline
             and (
                 self.entity_description.key == "running_status"
-                or self.coordinator.data[self.optimizer_id].running_status
+                or data[self.optimizer_id].running_status
                 != OptimizerRunningStatus.OFFLINE
             )
         )
 
         # Only read through the offline check above: an offline optimizer
         # reports a zero yield, which a total would show as a counter reset.
+        value = None
         if self._attr_available:
-            value = getattr(
-                self.coordinator.data[self.optimizer_id], self.entity_description.key
-            )
+            value = getattr(data[self.optimizer_id], self.entity_description.key)
             if self.entity_description.value_conversion_function:
                 value = self.entity_description.value_conversion_function(value)
 
+        # Clearing a total would publish 'unknown', which gaps statistics just
+        # as unavailable does.
+        if value is not None or not self.always_available:
             self._attr_native_value = value
-
-        elif not self.always_available:
-            self._attr_native_value = None
-
-        self.async_write_ha_state()
 
 
 def get_pv_entity_descriptions(count: int) -> list[HuaweiSolarSensorEntityDescription]:

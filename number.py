@@ -400,6 +400,7 @@ class HuaweiSolarNumberEntity(
             self._attr_native_value = self.coordinator.data[
                 self.entity_description.register_name
             ]
+            self._attr_available = True
 
             if self.entity_description.dynamic_minimum_key:
                 minimum = self.coordinator.data.get(

@@ -1,0 +1,28 @@
+# Development tooling only: the integration itself is installed by HACS from
+# the repository root and is not built as a Python package.
+[project]
+name = "huawei-solar-integration"
+version = "0.0.0"
+requires-python = ">=3.13"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    # Pinned to the Home Assistant release named in hacs.json.
+    "pytest-homeassistant-custom-component==0.13.277",
+    # aiodns 3.5 does not work with the pycares 5 API.
+    "pycares<5",
+    # config_flow.py imports serial and homeassistant.components.usb at module
+    # level, so the usb integration's own requirements have to be present.
+    "aiousbwatcher==1.1.1",
+    "pyserial==3.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py313"

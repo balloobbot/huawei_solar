@@ -71,6 +71,9 @@ class HuaweiSolarSensorEntityDescription(
 
     value_conversion_function: Callable[[Any], str] | None = None
 
+    # Defaults to True for a total, see HuaweiSolarStatisticsAvailability.
+    always_available: bool | None = None
+
     def __post_init__(self) -> None:
         """Defaults the translation_key to the sensor key."""
 
@@ -2275,8 +2278,39 @@ async def async_setup_entry(
     async_add_entities(entities_to_add, True)
 
 
+class HuaweiSolarStatisticsAvailability(SensorEntity):
+    """Decides whether a sensor holds its last value instead of dropping out."""
+
+    entity_description: HuaweiSolarSensorEntityDescription
+
+    @property
+    def always_available(self) -> bool:
+        """Whether this sensor keeps its last value when its data stops arriving.
+
+        A total that reads unavailable or unknown - because the inverter powers
+        down for the night, or because one component stopped answering - leaves
+        a gap in long-term statistics and the energy dashboard. So an
+        accumulator never reads unavailable, holding its last value even if the
+        device is gone for good. That is intended: statistics continuity beats
+        liveness signalling for a counter, and whether the device is reachable
+        belongs on a connectivity or diagnostic entity.
+        """
+        if self.entity_description.always_available is not None:
+            return self.entity_description.always_available
+
+        # The resolved state class, which also covers a sensor that sets it as
+        # an attribute rather than on its description.
+        return self.state_class in (
+            SensorStateClass.TOTAL,
+            SensorStateClass.TOTAL_INCREASING,
+        )
+
+
 class HuaweiSolarSensorEntity(
-    CoordinatorEntity[HuaweiSolarUpdateCoordinator], HuaweiSolarEntity, SensorEntity
+    HuaweiSolarStatisticsAvailability,
+    CoordinatorEntity[HuaweiSolarUpdateCoordinator],
+    HuaweiSolarEntity,
+    SensorEntity,
 ):
     """Huawei Solar Sensor which receives its data via an DataUpdateCoordinator."""
 
@@ -2304,6 +2338,15 @@ class HuaweiSolarSensorEntity(
 
         self._register_key = rn.RegisterName(register_key)
 
+    @property
+    def available(self) -> bool:
+        """Return if the entity is available.
+
+        CoordinatorEntity only reports on the poll as a whole, so the component
+        this sensor sits behind is taken into account here as well.
+        """
+        return self.always_available or (super().available and self._attr_available)
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
@@ -2317,7 +2360,10 @@ class HuaweiSolarSensorEntity(
             self._attr_available = True
         else:
             self._attr_available = False
-            self._attr_native_value = None
+            # Clearing this would publish 'unknown', which gaps statistics just
+            # as unavailable does.
+            if not self.always_available:
+                self._attr_native_value = None
 
         self.async_write_ha_state()
 
@@ -2816,6 +2862,7 @@ class HuaweiSolarActivePowerControlModeEntity(
 
 
 class HuaweiSolarOptimizerSensorEntity(
+    HuaweiSolarStatisticsAvailability,
     CoordinatorEntity[HuaweiSolarOptimizerUpdateCoordinator],
     HuaweiSolarEntity,
     SensorEntity,
@@ -2847,9 +2894,10 @@ class HuaweiSolarOptimizerSensorEntity(
 
         An optimizer entity is unavailable if the coordinator failed, or if the
         specific optimizer is offline (except for the running_status entity, which
-        should always show the actual status).
+        should always show the actual status, and for totals, which hold their
+        last value).
         """
-        return super().available and self._attr_available
+        return self.always_available or (super().available and self._attr_available)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -2865,7 +2913,9 @@ class HuaweiSolarOptimizerSensorEntity(
             )
         )
 
-        if self.optimizer_id in self.coordinator.data:
+        # Only read through the offline check above: an offline optimizer
+        # reports a zero yield, which a total would show as a counter reset.
+        if self._attr_available:
             value = getattr(
                 self.coordinator.data[self.optimizer_id], self.entity_description.key
             )
@@ -2874,7 +2924,7 @@ class HuaweiSolarOptimizerSensorEntity(
 
             self._attr_native_value = value
 
-        else:
+        elif not self.always_available:
             self._attr_native_value = None
 
         self.async_write_ha_state()

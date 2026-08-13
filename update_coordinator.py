@@ -85,40 +85,31 @@ class HuaweiSolarUpdateCoordinator(
         self._failed_components: set[str] = set()
 
     def _report_failed_components(self, report: UpdateReport) -> None:
-        """Log the components that did not answer, when that set changes.
+        """Log the components that newly stopped answering, one line each.
 
         A component stays quiet for hours at a time, and at one poll every 30
         seconds saying so on every one of them buries the log. Only the onset
-        is worth a line, and the recovery that ends it.
+        is worth a line; that the entities behind it went unavailable is
+        already visible without one.
         """
-        if set(report.failed) == self._failed_components:
-            return
-
-        if report.failed:
-            _LOGGER.warning(
-                "Device %s did not answer for %s. Only the entities behind "
-                "those registers become unavailable; the rest of the device "
-                "keeps updating",
-                self.device.serial_number,
-                ", ".join(
-                    f"{name} ({type(err).__name__})"
-                    for name, err in sorted(report.failed.items())
-                ),
-            )
-            # A refused address used to surface as a failed update. Now that it
-            # only costs one component, this is the only place it is said.
-            if any(
-                isinstance(err, IllegalDataAddressError)
-                for err in report.failed.values()
-            ):
-                _LOGGER.error(ILLEGAL_ADDRESS_HELP, self.device.serial_number)
-        else:
-            _LOGGER.info(
-                "Device %s is answering for all of its registers again",
-                self.device.serial_number,
-            )
-
+        newly_failed = sorted(set(report.failed) - self._failed_components)
         self._failed_components = set(report.failed)
+
+        for name in newly_failed:
+            _LOGGER.warning(
+                "Failed to fetch %s from %s: %s",
+                name,
+                self.device.serial_number,
+                report.failed[name],
+            )
+
+        # A refused address used to surface as a failed update. Now that it
+        # only costs one component, this is the only place it is said.
+        if any(
+            isinstance(report.failed[name], IllegalDataAddressError)
+            for name in newly_failed
+        ):
+            _LOGGER.error(ILLEGAL_ADDRESS_HELP, self.device.serial_number)
 
     async def _recycle_link(self) -> None:
         """Drop a link that is up but no longer answering.

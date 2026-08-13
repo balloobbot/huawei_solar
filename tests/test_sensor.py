@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from huawei_solar import REGISTER_LOCATIONS, register_names as rn
 from modbus_connection.exceptions import ModbusTimeoutError
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
@@ -128,3 +130,22 @@ async def test_a_total_restores_across_a_restart(
 
     assert _state(hass, entity_registry, TOTAL_SENSOR) == "999.99"
     assert _state(hass, entity_registry, INSTANTANEOUS_SENSOR) == "unavailable"
+
+
+async def test_a_failing_component_is_logged_once(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    mock_unit: MockModbusUnit,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A component can stay quiet for hours; only the onset is worth a line."""
+    mock_unit.fail_read(
+        REGISTER_LOCATIONS[TOTAL_SENSOR].definition().address,
+        ModbusTimeoutError("component gone"),
+    )
+
+    await _poll(hass, 1)
+    assert caplog.text.count("Failed to fetch Inverter") == 1
+
+    await _poll(hass, 2)
+    assert caplog.text.count("Failed to fetch Inverter") == 1

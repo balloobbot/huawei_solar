@@ -3,15 +3,26 @@
 [project]
 name = "huawei-solar-integration"
 version = "0.0.0"
-requires-python = ">=3.13"
+# 3.13.2 rather than 3.13: that is the floor Home Assistant 2025.12 itself
+# declares, and uv cannot resolve the dev group without it.
+requires-python = ">=3.13.2"
 
 [tool.uv]
 package = false
+# home-assistant 2025.12.0 pins aiohttp 3.13.2, but the hass-nabucasa it depends
+# on has since been published requiring aiohttp>=3.14.2, so the two no longer
+# resolve together; litellm only ships wheels for macOS arm64 from 1.96.0.
+# Neither package is involved in what these tests exercise.
+override-dependencies = ["aiohttp==3.13.2", "litellm>=1.96.0"]
 
 [dependency-groups]
 dev = [
-    # Pinned to the Home Assistant release named in hacs.json.
-    "pytest-homeassistant-custom-component==0.13.277",
+    # Tests run against the oldest Home Assistant the code actually works on,
+    # which is not the one hacs.json declares: update_coordinator.py passes
+    # UpdateFailed(retry_after=...), and that argument does not exist in
+    # 2025.9.0, the declared minimum. It is present in 2025.12.0, which this
+    # pins. The wrong declaration is upstream's, not this branch's.
+    "pytest-homeassistant-custom-component==0.13.298",
     # aiodns 3.5 does not work with the pycares 5 API.
     "pycares<5",
     # config_flow.py imports serial and homeassistant.components.usb at module

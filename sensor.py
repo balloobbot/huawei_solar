@@ -2305,15 +2305,26 @@ class HuaweiSolarStatisticsSensor(RestoreSensor):
         await super().async_added_to_hass()
 
     def _process_data(self) -> None:
-        """Keep the last value when this poll brought none.
+        """Keep the last value when this poll brought none, or a torn read.
 
         Clearing a total would publish 'unknown', which gaps statistics just
-        as unavailable does.
+        as unavailable does. A counter that dips by a hair is the other way to
+        lose history: some firmwares serve a multi-register counter mid-update,
+        and Home Assistant reads the lower value as a meter reset.
         """
         held = self._attr_native_value
         super()._process_data()
+        value = self._attr_native_value
 
-        if self._attr_native_value is None:
+        if value is None:
+            self._attr_native_value = held
+        elif (
+            self.entity_description.state_class is SensorStateClass.TOTAL_INCREASING
+            and isinstance(held, (int, float))
+            and isinstance(value, (int, float))
+            and held * 0.99 <= value < held
+        ):
+            # 1% apart: a real meter reset drops far further than a torn read.
             self._attr_native_value = held
 
 

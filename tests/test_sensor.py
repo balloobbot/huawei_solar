@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from huawei_solar import REGISTER_LOCATIONS, register_names as rn
-from modbus_connection.exceptions import ModbusTimeoutError
+from modbus_connection.exceptions import ModbusTimeoutError, ServerDeviceBusyError
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
 
 from homeassistant.components.sensor import SensorStateClass
@@ -33,6 +33,11 @@ from conftest import MOCK_REGISTERS, SERIAL_NUMBER, UNIT_ID, write_registers
 # A running total, and an instantaneous reading from the same component.
 TOTAL_SENSOR = rn.ACCUMULATED_YIELD_ENERGY
 INSTANTANEOUS_SENSOR = rn.ACTIVE_POWER
+# A counter Home Assistant watches for resets, unlike TOTAL_SENSOR.
+TOTAL_INCREASING_SENSOR = rn.DAILY_YIELD_ENERGY
+# On a component polled after the inverter's own, so failing it is contained
+# rather than taken for a device that never answered at all.
+LATER_COMPONENT_SENSOR = rn.PV_01_VOLTAGE
 
 
 def _entity_id(entity_registry: er.EntityRegistry, register_name: str) -> str:
@@ -65,8 +70,8 @@ async def test_totals_survive_a_silent_device(
     """A total holds its last value; an instantaneous reading goes unavailable.
 
     Both of the ways a poll can come up short are covered: the whole device
-    falling silent, as an inverter does overnight, and a single component that
-    stops answering while the rest of the device keeps updating.
+    falling silent, as an inverter does overnight, and a single component
+    failing while the rest of the device keeps updating.
     """
     await _poll(hass, 1)
     assert _state(hass, entity_registry, TOTAL_SENSOR) == "1234.56"
@@ -79,14 +84,55 @@ async def test_totals_survive_a_silent_device(
     assert _state(hass, entity_registry, INSTANTANEOUS_SENSOR) == "unavailable"
 
     mock_unit.fail_requests(None)
+    # Not a timeout: the total sits on the first component polled, and a
+    # timeout there means the whole device is silent, which is the case above.
     mock_unit.fail_read(
         REGISTER_LOCATIONS[TOTAL_SENSOR].definition().address,
-        ModbusTimeoutError("component gone"),
+        ServerDeviceBusyError(),
     )
     await _poll(hass, 3)
 
     assert _state(hass, entity_registry, TOTAL_SENSOR) == "1234.56"
     assert _state(hass, entity_registry, INSTANTANEOUS_SENSOR) == "unavailable"
+
+
+async def test_a_counter_ignores_a_torn_read(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    mock_unit: MockModbusUnit,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """A counter served mid-update reads a hair low, which reads as a meter reset.
+
+    Only a hair is ignored: a genuine reset drops much further than 1%, and is
+    published as the reset it is.
+    """
+    write_registers(mock_unit, {TOTAL_INCREASING_SENSOR: 100.0})
+    await _poll(hass, 1)
+    assert _state(hass, entity_registry, TOTAL_INCREASING_SENSOR) == "100.0"
+
+    write_registers(mock_unit, {TOTAL_INCREASING_SENSOR: 99.5})
+    await _poll(hass, 2)
+    assert _state(hass, entity_registry, TOTAL_INCREASING_SENSOR) == "100.0"
+
+    write_registers(mock_unit, {TOTAL_INCREASING_SENSOR: 50.0})
+    await _poll(hass, 3)
+    assert _state(hass, entity_registry, TOTAL_INCREASING_SENSOR) == "50.0"
+
+
+async def test_a_plain_total_is_allowed_to_fall(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    mock_unit: MockModbusUnit,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Home Assistant reads no reset into a TOTAL, so nothing is held back."""
+    await _poll(hass, 1)
+    assert _state(hass, entity_registry, TOTAL_SENSOR) == "1234.56"
+
+    write_registers(mock_unit, {TOTAL_SENSOR: 1230.0})
+    await _poll(hass, 2)
+    assert _state(hass, entity_registry, TOTAL_SENSOR) == "1230.0"
 
 
 async def test_a_total_restores_across_a_restart(
@@ -169,15 +215,15 @@ async def test_a_failing_component_is_logged_once(
 ) -> None:
     """A component can stay quiet for hours; only the onset is worth a line."""
     mock_unit.fail_read(
-        REGISTER_LOCATIONS[TOTAL_SENSOR].definition().address,
+        REGISTER_LOCATIONS[LATER_COMPONENT_SENSOR].definition().address,
         ModbusTimeoutError("component gone"),
     )
 
     await _poll(hass, 1)
-    assert caplog.text.count("Failed to fetch Inverter") == 1
+    assert caplog.text.count("Failed to fetch PVString[1]") == 1
 
     await _poll(hass, 2)
-    assert caplog.text.count("Failed to fetch Inverter") == 1
+    assert caplog.text.count("Failed to fetch PVString[1]") == 1
 
 
 async def test_diagnostics_name_the_component_that_stopped_answering(
@@ -187,7 +233,7 @@ async def test_diagnostics_name_the_component_that_stopped_answering(
 ) -> None:
     """Values alone do not say why a register is missing; the poll outcome does."""
     mock_unit.fail_read(
-        REGISTER_LOCATIONS[TOTAL_SENSOR].definition().address,
+        REGISTER_LOCATIONS[LATER_COMPONENT_SENSOR].definition().address,
         ModbusTimeoutError("component gone"),
     )
     await _poll(hass, 1)
@@ -195,5 +241,5 @@ async def test_diagnostics_name_the_component_that_stopped_answering(
     diagnostics = await async_get_config_entry_diagnostics(hass, init_integration)
     poll = diagnostics[f"device_{UNIT_ID}_poll"]
 
-    assert "component gone" in poll["failed"]["Inverter"]
-    assert "Inverter" not in poll["updated"]
+    assert "component gone" in poll["failed"]["PVString[1]"]
+    assert "PVString[1]" not in poll["updated"]

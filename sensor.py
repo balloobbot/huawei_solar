@@ -72,9 +72,6 @@ class HuaweiSolarSensorEntityDescription(
 
     value_conversion_function: Callable[[Any], str] | None = None
 
-    # Defaults to True for a total, see HuaweiSolarStatisticsAvailability.
-    always_available: bool | None = None
-
     def __post_init__(self) -> None:
         """Defaults the translation_key to the sensor key."""
 
@@ -1166,7 +1163,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
     entities_to_add: list[SensorEntity] = []
 
     entities_to_add.extend(
-        HuaweiSolarSensorEntity(
+        _create_sensor(
             ucs.update_coordinator,
             entity_description,
             ucs.device_info,
@@ -1178,7 +1175,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
     )
 
     entities_to_add.extend(
-        HuaweiSolarSensorEntity(
+        _create_sensor(
             ucs.update_coordinator,
             entity_description,
             ucs.device_info,
@@ -1188,7 +1185,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
 
     if ucs.device.has_optimizers:
         entities_to_add.extend(
-            HuaweiSolarSensorEntity(
+            _create_sensor(
                 ucs.update_coordinator,
                 entity_description,
                 ucs.device_info,
@@ -1200,7 +1197,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
         assert ucs.power_meter_update_coordinator
         assert ucs.power_meter
         entities_to_add.extend(
-            HuaweiSolarSensorEntity(
+            _create_sensor(
                 ucs.power_meter_update_coordinator, entity_description, ucs.power_meter
             )
             for entity_description in SINGLE_PHASE_METER_ENTITY_DESCRIPTIONS
@@ -1210,7 +1207,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
         assert ucs.power_meter_update_coordinator
         assert ucs.power_meter
         entities_to_add.extend(
-            HuaweiSolarSensorEntity(
+            _create_sensor(
                 ucs.power_meter_update_coordinator, entity_description, ucs.power_meter
             )
             for entity_description in THREE_PHASE_METER_ENTITY_DESCRIPTIONS
@@ -1234,7 +1231,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
         assert ucs.connected_energy_storage
 
         entities_to_add.extend(
-            HuaweiSolarSensorEntity(
+            _create_sensor(
                 ucs.energy_storage_update_coordinator,
                 entity_description,
                 ucs.connected_energy_storage,
@@ -1278,7 +1275,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
 
         if ucs.battery_1:
             entities_to_add.extend(
-                HuaweiSolarSensorEntity(
+                _create_sensor(
                     ucs.energy_storage_update_coordinator,
                     HuaweiSolarSensorEntityDescription(
                         key=entity_description_template.battery_1_key,
@@ -1298,7 +1295,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
 
         if ucs.battery_2:
             entities_to_add.extend(
-                HuaweiSolarSensorEntity(
+                _create_sensor(
                     ucs.energy_storage_update_coordinator,
                     HuaweiSolarSensorEntityDescription(
                         key=entity_description_template.battery_2_key,
@@ -1319,7 +1316,7 @@ async def create_sun2000_entities(ucs: HuaweiSolarInverterData) -> list[SensorEn
         optimizer_device_infos = ucs.optimizer_update_coordinator.optimizer_device_infos
 
         entities_to_add.extend(
-            HuaweiSolarOptimizerSensorEntity(
+            _create_optimizer_sensor(
                 ucs.optimizer_update_coordinator,
                 entity_description,
                 optimizer_id,
@@ -1777,9 +1774,7 @@ def create_emma_entities(
     assert isinstance(ucs.device, EMMADevice)
 
     entities: list[SensorEntity] = [
-        HuaweiSolarSensorEntity(
-            ucs.update_coordinator, entity_description, ucs.device_info
-        )
+        _create_sensor(ucs.update_coordinator, entity_description, ucs.device_info)
         for entity_description in EMMA_SENSOR_DESCRIPTIONS
     ]
 
@@ -2050,9 +2045,7 @@ def create_charger_entities(
     assert isinstance(ucs.device, SChargerDevice)
 
     return [
-        HuaweiSolarSensorEntity(
-            ucs.update_coordinator, entity_description, ucs.device_info
-        )
+        _create_sensor(ucs.update_coordinator, entity_description, ucs.device_info)
         for entity_description in CHARGER_SENSOR_DESCRIPTIONS
     ]
 
@@ -2064,9 +2057,7 @@ def create_sdongle_entities(
     assert isinstance(ucs.device, SDongleDevice)
 
     return [
-        HuaweiSolarSensorEntity(
-            ucs.update_coordinator, entity_description, ucs.device_info
-        )
+        _create_sensor(ucs.update_coordinator, entity_description, ucs.device_info)
         for entity_description in SDONGLE_SENSOR_DESCRIPTIONS
     ]
 
@@ -2228,9 +2219,7 @@ def create_meter_entities(
     assert isinstance(ucs.device, MeterDevice)
 
     return [
-        HuaweiSolarSensorEntity(
-            ucs.update_coordinator, entity_description, ucs.device_info
-        )
+        _create_sensor(ucs.update_coordinator, entity_description, ucs.device_info)
         for entity_description in METER_SENSOR_DESCRIPTIONS
     ]
 
@@ -2242,9 +2231,7 @@ def create_smartlogger_entities(
     assert isinstance(ucs.device, SmartLoggerDevice)
 
     entities: list[HuaweiSolarSensorEntity] = [
-        HuaweiSolarSensorEntity(
-            ucs.update_coordinator, entity_description, ucs.device_info
-        )
+        _create_sensor(ucs.update_coordinator, entity_description, ucs.device_info)
         for entity_description in SMARTLOGGER_SENSOR_DESCRIPTIONS
     ]
     entities.append(
@@ -2279,58 +2266,58 @@ async def async_setup_entry(
     async_add_entities(entities_to_add, True)
 
 
-class HuaweiSolarStatisticsAvailability(RestoreSensor):
-    """Decides whether a sensor holds its last value instead of dropping out."""
+class HuaweiSolarStatisticsSensor(RestoreSensor):
+    """Mixin for a long-term statistic: it holds its last value and stays available.
+
+    A total that reads unavailable or unknown - because the inverter powers
+    down for the night, or because one component stopped answering - leaves a
+    gap in long-term statistics and the energy dashboard. So an accumulator
+    never reads unavailable, holding its last value even if the device is gone
+    for good. That is intended: statistics continuity beats liveness
+    signalling for a counter, and whether the device is reachable belongs on a
+    connectivity or diagnostic entity.
+
+    Only these sensors carry RestoreSensor: every restorable entity is written
+    to disk on a timer, and the readings that gap harmlessly are the majority.
+    """
 
     entity_description: HuaweiSolarSensorEntityDescription
 
     @property
-    def always_available(self) -> bool:
-        """Whether this sensor keeps its last value when its data stops arriving.
+    def available(self) -> bool:
+        """Return that a total is always available.
 
-        A total that reads unavailable or unknown - because the inverter powers
-        down for the night, or because one component stopped answering - leaves
-        a gap in long-term statistics and the energy dashboard. So an
-        accumulator never reads unavailable, holding its last value even if the
-        device is gone for good. That is intended: statistics continuity beats
-        liveness signalling for a counter, and whether the device is reachable
-        belongs on a connectivity or diagnostic entity.
+        A property rather than _attr_available: CoordinatorEntity.available is
+        itself a property, so a class attribute would never be consulted.
         """
-        if self.entity_description.always_available is not None:
-            return self.entity_description.always_available
-
-        # The resolved state class, which also covers a sensor that sets it as
-        # an attribute rather than on its description.
-        return self.state_class in (
-            SensorStateClass.TOTAL,
-            SensorStateClass.TOTAL_INCREASING,
-        )
+        return True
 
     async def async_added_to_hass(self) -> None:
         """Seed a total with the value it held before the restart.
 
         Holding the value only lasts as long as the process does, so without
-        this a restart while the device is asleep still gaps statistics.
+        this a restart while the device is asleep still gaps statistics. Runs
+        before super(), whose _process_data() lets a live value win over it.
         """
-        await super().async_added_to_hass()
-
-        if (
-            self.always_available
-            and (last_data := await self.async_get_last_sensor_data()) is not None
-        ):
+        if (last_data := await self.async_get_last_sensor_data()) is not None:
             self._attr_native_value = last_data.native_value
 
-        # Not _handle_coordinator_update(): that writes the state, which Home
-        # Assistant does itself right after this returns.
-        self._process_data()
+        await super().async_added_to_hass()
 
     def _process_data(self) -> None:
-        """Take this entity's value out of the coordinator's latest data."""
-        raise NotImplementedError
+        """Keep the last value when this poll brought none.
+
+        Clearing a total would publish 'unknown', which gaps statistics just
+        as unavailable does.
+        """
+        held = self._attr_native_value
+        super()._process_data()
+
+        if self._attr_native_value is None:
+            self._attr_native_value = held
 
 
 class HuaweiSolarSensorEntity(
-    HuaweiSolarStatisticsAvailability,
     CoordinatorEntity[HuaweiSolarUpdateCoordinator],
     HuaweiSolarEntity,
     SensorEntity,
@@ -2361,6 +2348,14 @@ class HuaweiSolarSensorEntity(
 
         self._register_key = rn.RegisterName(register_key)
 
+    async def async_added_to_hass(self) -> None:
+        """Show the value the last poll already read."""
+        await super().async_added_to_hass()
+
+        # Not _handle_coordinator_update(): that writes the state, which Home
+        # Assistant does itself right after this returns.
+        self._process_data()
+
     @property
     def available(self) -> bool:
         """Return if the entity is available.
@@ -2368,7 +2363,7 @@ class HuaweiSolarSensorEntity(
         CoordinatorEntity only reports on the poll as a whole, so the component
         this sensor sits behind is taken into account here as well.
         """
-        return self.always_available or (super().available and self._attr_available)
+        return super().available and self._attr_available
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -2389,10 +2384,29 @@ class HuaweiSolarSensorEntity(
             value = None
             self._attr_available = False
 
-        # Clearing a total would publish 'unknown', which gaps statistics just
-        # as unavailable does.
-        if value is not None or not self.always_available:
-            self._attr_native_value = value
+        self._attr_native_value = value
+
+
+class HuaweiSolarTotalSensorEntity(
+    HuaweiSolarStatisticsSensor, HuaweiSolarSensorEntity
+):
+    """A Huawei Solar sensor holding a long-term statistic."""
+
+
+def _create_sensor(
+    coordinator: HuaweiSolarUpdateCoordinator,
+    description: HuaweiSolarSensorEntityDescription,
+    device_info: DeviceInfo,
+    context: Any = None,
+) -> HuaweiSolarSensorEntity:
+    """Build a sensor, restorable only when it carries a total."""
+    cls = (
+        HuaweiSolarTotalSensorEntity
+        if description.state_class
+        in (SensorStateClass.TOTAL, SensorStateClass.TOTAL_INCREASING)
+        else HuaweiSolarSensorEntity
+    )
+    return cls(coordinator, description, device_info, context)
 
 
 class HuaweiSolarAlarmSensorEntity(HuaweiSolarSensorEntity):
@@ -2885,7 +2899,6 @@ class HuaweiSolarActivePowerControlModeEntity(
 
 
 class HuaweiSolarOptimizerSensorEntity(
-    HuaweiSolarStatisticsAvailability,
     CoordinatorEntity[HuaweiSolarOptimizerUpdateCoordinator],
     HuaweiSolarEntity,
     SensorEntity,
@@ -2911,16 +2924,23 @@ class HuaweiSolarOptimizerSensorEntity(
         self._attr_device_info = device_info
         self._attr_unique_id = f"{device_info['name']}_{description.key}"
 
+    async def async_added_to_hass(self) -> None:
+        """Show the value the last poll already read."""
+        await super().async_added_to_hass()
+
+        # Not _handle_coordinator_update(): that writes the state, which Home
+        # Assistant does itself right after this returns.
+        self._process_data()
+
     @property
     def available(self) -> bool:
         """Return if entity is available.
 
         An optimizer entity is unavailable if the coordinator failed, or if the
         specific optimizer is offline (except for the running_status entity, which
-        should always show the actual status, and for totals, which hold their
-        last value).
+        should always show the actual status).
         """
-        return self.always_available or (super().available and self._attr_available)
+        return super().available and self._attr_available
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -2950,10 +2970,29 @@ class HuaweiSolarOptimizerSensorEntity(
             if self.entity_description.value_conversion_function:
                 value = self.entity_description.value_conversion_function(value)
 
-        # Clearing a total would publish 'unknown', which gaps statistics just
-        # as unavailable does.
-        if value is not None or not self.always_available:
-            self._attr_native_value = value
+        self._attr_native_value = value
+
+
+class HuaweiSolarOptimizerTotalSensorEntity(
+    HuaweiSolarStatisticsSensor, HuaweiSolarOptimizerSensorEntity
+):
+    """A Huawei Solar optimizer sensor holding a long-term statistic."""
+
+
+def _create_optimizer_sensor(
+    coordinator: HuaweiSolarOptimizerUpdateCoordinator,
+    description: HuaweiSolarSensorEntityDescription,
+    optimizer_id: int,
+    device_info: DeviceInfo,
+) -> HuaweiSolarOptimizerSensorEntity:
+    """Build an optimizer sensor, restorable only when it carries a total."""
+    cls = (
+        HuaweiSolarOptimizerTotalSensorEntity
+        if description.state_class
+        in (SensorStateClass.TOTAL, SensorStateClass.TOTAL_INCREASING)
+        else HuaweiSolarOptimizerSensorEntity
+    )
+    return cls(coordinator, description, optimizer_id, device_info)
 
 
 def get_pv_entity_descriptions(count: int) -> list[HuaweiSolarSensorEntityDescription]:

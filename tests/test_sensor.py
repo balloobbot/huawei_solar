@@ -10,9 +10,11 @@ from huawei_solar import REGISTER_LOCATIONS, register_names as rn
 from modbus_connection.exceptions import ModbusTimeoutError
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
 
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.restore_state import async_get as async_get_restore_state
 import homeassistant.util.dt as dt_util
 
 from custom_components.huawei_solar.const import DOMAIN, INVERTER_UPDATE_INTERVAL
@@ -133,6 +135,30 @@ async def test_a_total_restores_across_a_restart(
 
     assert _state(hass, entity_registry, TOTAL_SENSOR) == "999.99"
     assert _state(hass, entity_registry, INSTANTANEOUS_SENSOR) == "unavailable"
+
+
+async def test_only_a_total_registers_for_restoring(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Only the sensors that need their value back ask to be restored.
+
+    Home Assistant writes every registered entity to disk on a timer, and the
+    readings that gap harmlessly - a power, a voltage - are the large majority.
+    """
+    totals = {
+        entry.entity_id
+        for entry in er.async_entries_for_config_entry(
+            entity_registry, init_integration.entry_id
+        )
+        if (state := hass.states.get(entry.entity_id))
+        and state.attributes.get("state_class")
+        in (SensorStateClass.TOTAL, SensorStateClass.TOTAL_INCREASING)
+    }
+
+    assert totals
+    assert set(async_get_restore_state(hass).entities) == totals
 
 
 async def test_a_failing_component_is_logged_once(

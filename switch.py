@@ -129,10 +129,13 @@ async def async_setup_entry(
                 )
             )
 
+            # A setting, so it rides the configuration coordinator like the rest
+            # of them: on the inverter's own it would pull the whole
+            # Configuration component into the 30 second poll.
             slave_entities.extend(
                 [
                     HuaweiSolarSwitchEntity(
-                        ucs.update_coordinator,
+                        ucs.configuration_update_coordinator,
                         ucs.device,
                         entity_description,
                         ucs.device_info,

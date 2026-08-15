@@ -61,7 +61,7 @@ class HuaweiSolarUpdateCoordinator(
         hass: HomeAssistant,
         logger: logging.Logger,
         device: HuaweiSolarDevice,
-        connection: HuaweiModbusConnection,
+        connection: HuaweiModbusConnection | None,
         name: str,
         update_interval: timedelta | None = None,
         update_method: Callable[[], Awaitable[dict[RegisterName, Any]]]
@@ -121,7 +121,16 @@ class HuaweiSolarUpdateCoordinator(
         device behind it has stopped answering - which is what an inverter
         behind an SDongle or a serial-to-network bridge does. Dropping the link
         makes the next poll open a fresh one, without reloading the entry.
+
+        Only the device's own coordinator is handed the connection. Every
+        coordinator on a device shares one link, so counting timeouts on each of
+        them would let a silent device be diagnosed several times over and have
+        the link torn down from under a poll another coordinator is still
+        running. The fastest one notices soonest anyway.
         """
+        if self.connection is None:
+            return
+
         self._consecutive_timeouts += 1
         if self._consecutive_timeouts < TIMEOUTS_BEFORE_RECONNECT:
             return

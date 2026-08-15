@@ -395,7 +395,7 @@ async def _setup_inverter_device_data(
             hass,
             _LOGGER,
             device=device,
-            connection=connection,
+            connection=None,
             name=f"{device.serial_number}_power_meter_data_update_coordinator",
             update_interval=POWER_METER_UPDATE_INTERVAL,
         )
@@ -419,7 +419,7 @@ async def _setup_inverter_device_data(
             hass,
             _LOGGER,
             device=device,
-            connection=connection,
+            connection=None,
             name=f"{device.serial_number}_battery_data_update_coordinator",
             update_interval=ENERGY_STORAGE_UPDATE_INTERVAL,
         )
@@ -508,7 +508,7 @@ async def _setup_inverter_device_data(
             hass,
             _LOGGER,
             device=device,
-            connection=connection,
+            connection=None,
             name=f"{device.serial_number}_config_data_update_coordinator",
             update_interval=CONFIGURATION_UPDATE_INTERVAL,
         )
@@ -594,7 +594,7 @@ async def _setup_device_data(
             hass,
             _LOGGER,
             device=device,
-            connection=connection,
+            connection=None,
             name=f"{device.serial_number}_config_data_update_coordinator",
             update_interval=CONFIGURATION_UPDATE_INTERVAL,
         )

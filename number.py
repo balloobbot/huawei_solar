@@ -348,6 +348,7 @@ class HuaweiSolarNumberEntity(
 
         Do not use directly. Use `.create` instead!
         """
+        coordinator = coordinator.for_registers(description.context["register_names"])
         super().__init__(coordinator, description.context)
         self.coordinator = coordinator
 

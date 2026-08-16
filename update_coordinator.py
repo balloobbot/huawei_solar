@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from huawei_solar import (
+    SETTING_REGISTERS,
     ConnectionInterruptedException,
     DecodeError,
     HuaweiModbusConnection,
@@ -68,6 +69,7 @@ class HuaweiSolarUpdateCoordinator(
         | None = None,
         request_refresh_debouncer: Debouncer | None = None,
         update_timeout: timedelta = UPDATE_TIMEOUT,
+        settings: bool = False,
     ) -> None:
         """Create a HuaweiSolarUpdateCoordinator."""
         super().__init__(
@@ -81,9 +83,28 @@ class HuaweiSolarUpdateCoordinator(
         self.device = device
         self.connection = connection
         self.update_timeout = update_timeout
+        self.settings = settings
+        # The other half of the split poll, so an entity attaches to the
+        # coordinator that reads its registers rather than to the one that
+        # happened to build it. None while there is no settings poll.
+        self.counterpart: HuaweiSolarUpdateCoordinator | None = None
         self._consecutive_timeouts = 0
         self._failed_components: set[str] = set()
         self.last_report: UpdateReport | None = None
+
+    def for_registers(
+        self, register_names: list[RegisterName]
+    ) -> "HuaweiSolarUpdateCoordinator":
+        """Return the coordinator polling ``register_names``.
+
+        Which half a register belongs to is the library's SETTING_REGISTERS,
+        derived from its register map: what can be written only changes when
+        something writes it. The integration keeps no list of its own to drift.
+        """
+        settings = all(name in SETTING_REGISTERS for name in register_names)
+        if settings == self.settings:
+            return self
+        return self.counterpart or self
 
     def _report_failed_components(self, report: UpdateReport) -> None:
         """Log the components that newly stopped answering, one line each.
@@ -152,9 +173,14 @@ class HuaweiSolarUpdateCoordinator(
         register_names_set = set(
             chain.from_iterable(ctx["register_names"] for ctx in self.async_contexts())
         )
+        poll = (
+            self.device.batch_update_settings
+            if self.settings
+            else self.device.batch_update_readings
+        )
         try:
             async with asyncio.timeout(self.update_timeout.total_seconds()):
-                report = await self.device.batch_update_report(list(register_names_set))
+                report = await poll(list(register_names_set))
         except TimeoutError as err:
             await self._recycle_link()
             raise UpdateFailed(

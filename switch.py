@@ -129,9 +129,6 @@ async def async_setup_entry(
                 )
             )
 
-            # A setting, so it rides the configuration coordinator like the rest
-            # of them: on the inverter's own it would pull the whole
-            # Configuration component into the 30 second poll.
             slave_entities.extend(
                 [
                     HuaweiSolarSwitchEntity(
@@ -193,6 +190,7 @@ class HuaweiSolarSwitchEntity(
 
         Do not use directly. Use `.create` instead!
         """
+        coordinator = coordinator.for_registers(description.context["register_names"])
         super().__init__(coordinator, description.context)
         self.coordinator = coordinator
 
@@ -265,8 +263,6 @@ class HuaweiSolarOnOffSwitchEntity(
 
     def __init__(
         self,
-        # not the HuaweiSolarConfigurationUpdateCoordinator as
-        # this entity depends on the 'Device Status' register
         coordinator: HuaweiSolarUpdateCoordinator,
         device: HuaweiSolarDevice,
         device_info: DeviceInfo,
@@ -275,6 +271,7 @@ class HuaweiSolarOnOffSwitchEntity(
 
         Do not use directly. Use `.create` instead!
         """
+        coordinator = coordinator.for_registers([rn.DEVICE_STATUS])
         super().__init__(coordinator, {"register_names": [rn.DEVICE_STATUS]})
         self.coordinator = coordinator
 

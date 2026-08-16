@@ -193,6 +193,7 @@ class HuaweiSolarSelectEntity(
         device_info: DeviceInfo,
     ) -> None:
         """Huawei Solar Select Entity constructor."""
+        coordinator = coordinator.for_registers(description.context["register_names"])
         super().__init__(coordinator, description.context)
         self.coordinator = coordinator
 
@@ -282,6 +283,7 @@ class StorageModeSelectEntity(
 
         Do not use directly. Use `.create` instead!
         """
+        coordinator = coordinator.for_registers([rn.STORAGE_WORKING_MODE_SETTINGS])
         super().__init__(
             coordinator, {"register_names": [rn.STORAGE_WORKING_MODE_SETTINGS]}
         )

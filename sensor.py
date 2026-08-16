@@ -2345,7 +2345,9 @@ class HuaweiSolarSensorEntity(
         context: Any = None,
     ) -> None:
         """Batched Huawei Solar Sensor Entity constructor."""
-        super().__init__(coordinator, context or description.context)
+        context = context or description.context
+        coordinator = coordinator.for_registers(context["register_names"])
+        super().__init__(coordinator, context)
 
         self.coordinator = coordinator
         self.entity_description = description
@@ -2562,6 +2564,7 @@ class HuaweiSolarTOUSensorEntity(
         entity_registry_enabled_default: bool = True,
     ) -> None:
         """Huawei Solar TOU Sensor Entity constructor."""
+        coordinator = coordinator.for_registers([register_name])
         super().__init__(
             coordinator,
             {"register_names": [register_name]},
@@ -2639,6 +2642,7 @@ class HuaweiSolarPricePeriodsSensorEntity(
         entity_registry_enabled_default: bool = True,
     ) -> None:
         """Huawei Solar TOU Sensor Entity constructor."""
+        coordinator = coordinator.for_registers([register_name])
         super().__init__(
             coordinator,
             {"register_names": [register_name]},
@@ -2698,6 +2702,7 @@ class HuaweiSolarCapacityControlPeriodsSensorEntity(
         device_info: DeviceInfo,
     ) -> None:
         """Huawei Solar Capacity Control Periods Sensor Entity constructor."""
+        coordinator = coordinator.for_registers([rn.STORAGE_CAPACITY_CONTROL_PERIODS])
         super().__init__(
             coordinator, {"register_names": [rn.STORAGE_CAPACITY_CONTROL_PERIODS]}
         )
@@ -2766,6 +2771,7 @@ class HuaweiSolarForcibleChargeEntity(
         device_info: DeviceInfo,
     ) -> None:
         """Create HuaweiSolarForcibleChargeEntity."""
+        coordinator = coordinator.for_registers(self.REGISTER_NAMES)
         super().__init__(
             coordinator,
             {"register_names": self.REGISTER_NAMES},
@@ -2849,6 +2855,7 @@ class HuaweiSolarActivePowerControlModeEntity(
         device_info: DeviceInfo,
     ) -> None:
         """Create HuaweiSolarForcibleChargeEntity."""
+        coordinator = coordinator.for_registers(self.REGISTER_NAMES)
         super().__init__(
             coordinator,
             {"register_names": self.REGISTER_NAMES},

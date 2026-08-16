@@ -20,7 +20,9 @@ INVERTER_UPDATE_INTERVAL = timedelta(seconds=30)
 POWER_METER_UPDATE_INTERVAL = timedelta(seconds=30)
 ENERGY_STORAGE_UPDATE_INTERVAL = timedelta(seconds=30)
 UPDATE_TIMEOUT = timedelta(seconds=29)
-# configuration can only change when edited through FusionSolar web or app
+# The settings poll: every register the device was told rather than measured.
+# Home Assistant reads its own writes back straight away, so this interval only
+# has to catch a change made through FusionSolar web or app.
 CONFIGURATION_UPDATE_INTERVAL = timedelta(minutes=15)
 CONFIGURATION_UPDATE_TIMEOUT = timedelta(minutes=1)
 # optimizer data is only refreshed every 5 minutes by the inverter.

@@ -511,6 +511,13 @@ async def _setup_inverter_device_data(
             connection=None,
             name=f"{device.serial_number}_config_data_update_coordinator",
             update_interval=CONFIGURATION_UPDATE_INTERVAL,
+            settings=True,
+        )
+        _pair_settings_coordinator(
+            configuration_update_coordinator,
+            update_coordinator,
+            power_meter_update_coordinator,
+            energy_storage_update_coordinator,
         )
     else:
         configuration_update_coordinator = None
@@ -530,6 +537,23 @@ async def _setup_inverter_device_data(
         battery_2=battery_2_device_info,
         configuration_update_coordinator=configuration_update_coordinator,
     )
+
+
+def _pair_settings_coordinator(
+    settings: HuaweiSolarUpdateCoordinator,
+    device_coordinator: HuaweiSolarUpdateCoordinator,
+    *sub_device_coordinators: HuaweiSolarUpdateCoordinator | None,
+) -> None:
+    """Let the two halves of the poll find each other.
+
+    Entities attach through `for_registers`, which needs the other half to route
+    to. Every readings coordinator routes to the settings one; that one routes
+    back to the device's own, there being a single settings poll per device.
+    """
+    settings.counterpart = device_coordinator
+    for coordinator in (device_coordinator, *sub_device_coordinators):
+        if coordinator:
+            coordinator.counterpart = settings
 
 
 DEVICE_CLASS_TO_TRANSLATION_KEY: dict[type[HuaweiSolarDevice], str] = {
@@ -597,7 +621,9 @@ async def _setup_device_data(
             connection=None,
             name=f"{device.serial_number}_config_data_update_coordinator",
             update_interval=CONFIGURATION_UPDATE_INTERVAL,
+            settings=True,
         )
+        _pair_settings_coordinator(configuration_update_coordinator, update_coordinator)
     else:
         configuration_update_coordinator = None
 

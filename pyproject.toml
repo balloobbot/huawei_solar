@@ -13,6 +13,9 @@ package = false
 # what these tests exercise.
 override-dependencies = ["litellm>=1.96.0"]
 
+[tool.uv.sources]
+huawei-solar = { path = "../huawei-solar-lib", editable = true }
+
 [dependency-groups]
 dev = [
     # Tests run against the oldest Home Assistant the code actually works on,
@@ -23,6 +26,14 @@ dev = [
     # level, so the usb integration's own requirements have to be present.
     "aiousbwatcher==1.1.1",
     "pyserial==3.5",
+    # The device library comes from the sibling checkout rather than PyPI: the
+    # manifest requires 4.0.0 and 3.0.7 is the newest release, so only the branch
+    # being migrated has the API this code calls. Unpinned because that branch
+    # still reports the 3.0.x its last tag implies.
+    "huawei-solar",
+    # Imported by the tests in its own right (modbus_connection.mock and
+    # .exceptions), not only through huawei-solar. Floor tracks manifest.json.
+    "modbus-connection>=4.8.1",
 ]
 
 [tool.pytest.ini_options]

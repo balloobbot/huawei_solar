@@ -24,6 +24,15 @@ writability compared against the old table. On top of that, all 228 of the
 integration's entity descriptions are checked to resolve to real registers, and
 a smoke run reads the full 193-register sensor set in 23 block reads.
 
+**What it cannot do yet.** `manifest.json` requires `huawei-solar>=4.0.0` and that
+release does not exist — the newest tag is `v3.0.7`, and the library takes its
+version from its tags. The floor is deliberate: handing out register values
+instead of a `Result`, and reaching a device through a shared connection rather
+than one it owns, are breaking changes, so the branch is a major bump. It does
+mean this branch cannot be installed from HACS until `huawei-solar` v4.0.0 is
+tagged and released. Until then the tests run against the sibling checkout, which
+`pyproject.toml` points at directly.
+
 ---
 
 ## 1. What weird things does this library do?
